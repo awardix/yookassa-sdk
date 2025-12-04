@@ -15,13 +15,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -37,10 +47,41 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Connector = exports.endpoints = void 0;
 const axios_1 = __importDefault(require("axios"));
-const cache_manager_1 = require("cache-manager");
 const AxiosLogger = __importStar(require("axios-logger"));
 const axios_rate_limit_1 = __importDefault(require("axios-rate-limit"));
 const crypto_1 = require("crypto");
+const https_proxy_agent_1 = require("https-proxy-agent");
+/** Таймаут запроса по умолчанию (мс) */
+const DEFAULT_TIMEOUT = 5000;
+/** Количество повторных попыток по умолчанию */
+const DEFAULT_RETRIES = 5;
+/** Задержка между повторными попытками (мс) */
+const RETRY_DELAY = 1000;
+/**
+ * Проверяет, можно ли повторить запрос (идемпотентные ошибки)
+ */
+function isRetryableError(error) {
+    // Сетевые ошибки
+    if (!error.response) {
+        return true;
+    }
+    // Ошибки сервера (5xx)
+    const status = error.response.status;
+    if (status >= 500 && status < 600) {
+        return true;
+    }
+    // Too Many Requests
+    if (status === 429) {
+        return true;
+    }
+    return false;
+}
+/**
+ * Задержка выполнения
+ */
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 exports.endpoints = {
     refunds: {
         create: {
@@ -99,111 +140,134 @@ exports.endpoints = {
         },
     },
 };
-//Idempotence-Key
+/**
+ * Базовый класс для работы с API YooKassa
+ */
 class Connector {
     constructor(init) {
-        this.endpoint = 'https://api.yookassa.ru/v3/';
-        this.instanceCache = (0, cache_manager_1.createCache)((0, cache_manager_1.memoryStore)(), { ttl: 90 * 1000 });
-        this.debug = false;
-        this.maxRPS = 5;
-        this.endpoint = init.endpoint || 'https://api.yookassa.ru/v3/';
-        this.debug = init.debug;
-        this.maxRPS = init.maxRPS || this.maxRPS;
-        this.axiosConfig = {
+        var _a, _b, _c, _d;
+        // Убираем trailing slash из endpoint
+        this.endpoint = (init.endpoint || 'https://api.yookassa.ru/v3').replace(/\/+$/, '');
+        this.debug = (_a = init.debug) !== null && _a !== void 0 ? _a : false;
+        this.maxRPS = (_b = init.maxRPS) !== null && _b !== void 0 ? _b : 5;
+        this.timeout = (_c = init.timeout) !== null && _c !== void 0 ? _c : DEFAULT_TIMEOUT;
+        this.retries = (_d = init.retries) !== null && _d !== void 0 ? _d : DEFAULT_RETRIES;
+        const axiosConfig = {
             baseURL: this.endpoint,
+            timeout: this.timeout,
             auth: { username: init.shop_id, password: init.secret_key },
             headers: {
                 'Content-Type': 'application/json',
-                'User-Agent': 'GoogleSheets.ru/yookassa-sdk',
-                // 'Idempotence-Key': '111',
+                'User-Agent': 'awardix/yookassa-sdk',
             },
+            // Используем https-proxy-agent вместо встроенного axios proxy
+            // Это работает корректно в Next.js server actions
+            proxy: false, // Отключаем встроенный axios proxy
+            httpsAgent: init.proxy ? new https_proxy_agent_1.HttpsProxyAgent(init.proxy) : undefined,
+            httpAgent: init.proxy ? new https_proxy_agent_1.HttpsProxyAgent(init.proxy) : undefined,
         };
-        const instance = axios_1.default.create({
-            baseURL: this.endpoint,
-            auth: { username: init.shop_id, password: init.secret_key },
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            'axios-retry': {
-                retries: 5,
-                retryDelay: (retryCount) => {
-                    return 1000 * Math.pow(2, retryCount);
-                },
-                onRetry(retryCount, error, requestConfig) {
-                    console.log(`Retry attempt: ${retryCount}\nreason: ${error}`);
-                },
-            },
+        // Создаём инстанс axios с rate limiting
+        this.axiosInstance = (0, axios_rate_limit_1.default)(axios_1.default.create(axiosConfig), {
+            maxRPS: this.maxRPS,
         });
+        // Логирование запросов и ответов в debug режиме
+        if (this.debug) {
+            this.axiosInstance.interceptors.request.use(AxiosLogger.requestLogger, AxiosLogger.errorLogger);
+            this.axiosInstance.interceptors.response.use(AxiosLogger.responseLogger, AxiosLogger.errorLogger);
+        }
     }
-    getInstance(opts) {
-        return __awaiter(this, void 0, void 0, function* () {
-            if (opts.requestId) {
-                const cachedInstance = yield this.instanceCache.get(opts.requestId);
-                if (cachedInstance) {
-                    return cachedInstance;
-                }
-            }
-            const requestId = opts.requestId || (0, crypto_1.randomUUID)();
-            const url = this.endpoint + opts.endpoint;
-            const instance = (0, axios_rate_limit_1.default)(axios_1.default.create(this.axiosConfig), {
-                maxRPS: opts.maxRPS || this.maxRPS,
-            });
-            // instance.defaults.validateStatus = statusCode => statusCode < 500;
-            //Логгирование запросов и ответов
-            if (this.debug || opts.debug) {
-                instance.interceptors.request.use(AxiosLogger.requestLogger, AxiosLogger.errorLogger);
-                instance.interceptors.response.use(AxiosLogger.responseLogger, AxiosLogger.errorLogger);
-            }
-            instance.interceptors.response.use(function (response) {
-                const result = {
-                    success: 'OK',
-                    requestId: response.config.headers['Idempotence-Key'],
-                    data: response.data,
-                };
-                response.data = result;
-                return response;
-            }, function (err) {
-                var _a;
-                if ((_a = err.response) === null || _a === void 0 ? void 0 : _a.data) {
-                    const result = {
-                        success: 'NO_OK',
-                        errorData: err.response.data,
-                        requestId: err.response.config.headers['Idempotence-Key'],
-                    };
-                    err.response.data = result;
-                    return Promise.resolve(err.response);
-                }
-                return Promise.reject(err);
-            });
-            const requestConfig = {
-                method: opts.method,
-                url: url,
-            };
-            if (opts.method === 'POST') {
-                requestConfig.data = opts.data;
-            }
-            instance.defaults.headers.common['Idempotence-Key'] = requestId;
-            this.instanceCache.set(requestId, instance);
-            return instance;
-        });
-    }
+    /**
+     * Выполняет запрос к API с поддержкой retry и идемпотентности
+     */
     request(opts) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a;
-            (_a = opts.requestId) !== null && _a !== void 0 ? _a : (opts.requestId = (0, crypto_1.randomUUID)());
-            const requestId = opts.requestId;
-            const instance = yield this.getInstance(opts);
-            const url = this.endpoint + opts.endpoint;
-            const requestConfig = {
-                method: opts.method,
-                url: url,
-            };
-            if (opts.method === 'POST') {
-                requestConfig.data = opts.data;
+            var _a, _b, _c, _d;
+            // Генерируем или используем переданный Idempotence-Key
+            const idempotenceKey = (_a = opts.requestId) !== null && _a !== void 0 ? _a : (0, crypto_1.randomUUID)();
+            let lastError = null;
+            for (let attempt = 0; attempt <= this.retries; attempt++) {
+                try {
+                    const response = yield this.axiosInstance.request({
+                        method: opts.method,
+                        url: opts.endpoint, // baseURL уже задан, endpoint начинается с /
+                        data: opts.method === 'POST' ? opts.data : undefined,
+                        params: opts.params,
+                        headers: {
+                            'Idempotence-Key': idempotenceKey,
+                        },
+                    });
+                    return {
+                        success: 'OK',
+                        data: response.data,
+                        requestId: idempotenceKey,
+                    };
+                }
+                catch (error) {
+                    const axiosError = error;
+                    // Проверяем, является ли ответ валидным JSON от YooKassa API
+                    const responseData = (_b = axiosError.response) === null || _b === void 0 ? void 0 : _b.data;
+                    const isValidYooKassaError = responseData &&
+                        typeof responseData === 'object' &&
+                        'type' in responseData &&
+                        responseData.type === 'error';
+                    // Если есть валидный ответ от API YooKassa
+                    if (isValidYooKassaError) {
+                        const errorData = responseData;
+                        // Если ошибка не retryable, сразу возвращаем
+                        if (!isRetryableError(axiosError)) {
+                            return {
+                                success: 'NO_OK',
+                                errorData,
+                                requestId: idempotenceKey,
+                            };
+                        }
+                    }
+                    lastError = axiosError;
+                    // Если это не последняя попытка и ошибка retryable
+                    if (attempt < this.retries && isRetryableError(axiosError)) {
+                        const waitTime = RETRY_DELAY * Math.pow(2, attempt); // Exponential backoff
+                        if (this.debug) {
+                            console.log(`[YooKassa] Retry attempt ${attempt + 1}/${this.retries}, waiting ${waitTime}ms...`);
+                        }
+                        yield delay(waitTime);
+                        continue;
+                    }
+                    // Последняя попытка или не retryable ошибка
+                    if (isValidYooKassaError) {
+                        return {
+                            success: 'NO_OK',
+                            errorData: responseData,
+                            requestId: idempotenceKey,
+                        };
+                    }
+                    // Сетевая ошибка или невалидный ответ (HTML, прокси-ошибка и т.д.)
+                    const statusCode = (_c = axiosError.response) === null || _c === void 0 ? void 0 : _c.status;
+                    const statusText = ((_d = axiosError.response) === null || _d === void 0 ? void 0 : _d.statusText) || axiosError.message;
+                    return {
+                        success: 'NO_OK',
+                        errorData: {
+                            type: 'error',
+                            id: idempotenceKey,
+                            code: statusCode ? `HTTP_${statusCode}` : (axiosError.code || 'NETWORK_ERROR'),
+                            description: statusCode
+                                ? `HTTP ${statusCode}: ${statusText}`
+                                : (axiosError.message || 'Network error occurred'),
+                        },
+                        requestId: idempotenceKey,
+                    };
+                }
             }
-            const response = yield instance.request(requestConfig);
-            const result = response.data;
-            return result;
+            // Если все попытки исчерпаны (не должно сюда дойти, но на всякий случай)
+            return {
+                success: 'NO_OK',
+                errorData: {
+                    type: 'error',
+                    id: idempotenceKey,
+                    code: (lastError === null || lastError === void 0 ? void 0 : lastError.code) || 'RETRY_EXHAUSTED',
+                    description: (lastError === null || lastError === void 0 ? void 0 : lastError.message) || 'All retry attempts failed',
+                },
+                requestId: idempotenceKey,
+            };
         });
     }
 }

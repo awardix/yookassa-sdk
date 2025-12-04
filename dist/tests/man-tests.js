@@ -13,9 +13,13 @@ const client_1 = require("../client");
 const general_types_1 = require("../types/general.types");
 const initOpts = {
     debug: true,
-    secret_key: 'test_mCqzu8TlMR46mwYJQuQft9xNi_NEdnaIHSgaRAmuNhI',
-    shop_id: '909048',
+    //proxy: 'http://proxy.example.com:8080',
+    secret_key: process.env.YOO_SECRET_KEY || '',
+    shop_id: process.env.YOO_SHOP_ID || '',
 };
+if (!initOpts.secret_key || !initOpts.shop_id) {
+    throw new Error('YOO_SECRET_KEY and YOO_SHOP_ID must be set');
+}
 function test() {
     return __awaiter(this, void 0, void 0, function* () {
         const sdk = (0, client_1.YooKassa)(initOpts);
@@ -46,7 +50,7 @@ function test() {
         console.log('response in test:', response);
     });
 }
-// test();
+//test()
 function testGetPayment() {
     return __awaiter(this, void 0, void 0, function* () {
         const sdk = (0, client_1.YooKassa)(initOpts);

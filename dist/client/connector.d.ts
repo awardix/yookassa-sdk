@@ -1,6 +1,9 @@
-import { AxiosInstance, AxiosRequestConfig } from 'axios';
 import { RateLimitedAxiosInstance } from 'axios-rate-limit';
 import { YooKassaErrResponse } from '../types/api.types';
+/**
+ * Конфигурация прокси-сервера (URL строка)
+ */
+export type ProxyConfig = string;
 /**
  * Данные для подключения к API YooKassa
  */
@@ -10,22 +13,39 @@ export type ConnectorOpts = {
      */
     shop_id: string;
     /**
-     * Секретный ключ
+     * Секретный ключ
      */
     secret_key: string;
     /**
-     * Эндпоинт API
-     * @default "https://api.yookassa.ru/v3/"
+     * Эндпоинт API (без слэша в конце)
+     * @default "https://api.yookassa.ru/v3"
      */
     endpoint?: string;
     /** Отладочный режим */
-    debug: boolean;
-    /**  URL для редиректа */
+    debug?: boolean;
+    /** URL для редиректа */
     redirect_url?: string;
-    /** Количество запросов в секунду
+    /**
+     * Количество запросов в секунду
      * @default 5
      */
     maxRPS?: number;
+    /**
+     * Таймаут запроса в миллисекундах
+     * @default 5000
+     */
+    timeout?: number;
+    /**
+     * Количество повторных попыток при ошибках
+     * @default 5
+     */
+    retries?: number;
+    /**
+     * Конфигурация прокси-сервера
+     * Можно указать как строку URL (например, "http://user:pass@proxy.example.com:8080")
+     * или объект AxiosProxyConfig
+     */
+    proxy?: ProxyConfig;
 };
 export declare const endpoints: {
     refunds: {
@@ -112,15 +132,20 @@ type GoodApiResponse<Res> = {
     requestId: string;
 };
 export type ApiResponse<Res> = BadApiResponse | GoodApiResponse<Res>;
+/**
+ * Базовый класс для работы с API YooKassa
+ */
 export declare class Connector {
-    protected axios: AxiosInstance;
-    protected axiosConfig: AxiosRequestConfig;
+    protected axiosInstance: RateLimitedAxiosInstance;
     protected endpoint: string;
-    protected instanceCache: import("cache-manager").MemoryCache;
-    debug: boolean;
-    maxRPS: number;
+    protected debug: boolean;
+    protected maxRPS: number;
+    protected timeout: number;
+    protected retries: number;
     constructor(init: ConnectorOpts);
-    protected getInstance<Res, Data = Record<string, any>>(opts: RequestOpts<Data>): Promise<RateLimitedAxiosInstance>;
+    /**
+     * Выполняет запрос к API с поддержкой retry и идемпотентности
+     */
     protected request<Res = Record<string, any>, Data = Record<string, any>>(opts: RequestOpts<Data>): Promise<ApiResponse<Res>>;
 }
 export {};

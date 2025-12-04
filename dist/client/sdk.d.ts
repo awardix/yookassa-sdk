@@ -1,8 +1,9 @@
-import { GetPaymentListFilter, GetReceiptListFilter, GetRefundListFilter } from '../types/api.types';
-import { Payments } from '../types/payments';
-import { Connector, ConnectorOpts } from './connector';
-import { Refunds } from '../types/refunds';
-import { Receipts } from '../types/receipt';
+import { type GetPaymentListFilter, type GetReceiptListFilter, type GetRefundListFilter } from '../types/api.types';
+import type { Payments } from '../types/payments';
+import { Connector } from './connector';
+import type { ConnectorOpts } from './connector';
+import type { Refunds } from '../types/refunds';
+import type { Receipts } from '../types/receipt';
 export declare class YooKassaSdk extends Connector {
     constructor(opts: ConnectorOpts);
     protected getPaymentById: (id: string) => Promise<Payments.IPayment>;
@@ -10,18 +11,18 @@ export declare class YooKassaSdk extends Connector {
      *
      * Запрос позволяет получить список платежей, отфильтрованный по заданным критериям. [Подробнее о работе со списками](https://yookassa.ru/developers/using-api/lists)
      */
-    protected getPaymentList: (filter?: Omit<GetPaymentListFilter, 'cursor'>) => Promise<Payments.IPayment[]>;
+    protected getPaymentList: (filter?: Omit<GetPaymentListFilter, "cursor">) => Promise<Payments.IPayment[]>;
     /** Создать платеж */
     protected createPayment: (newPayment: Payments.CreatePaymentRequest) => Promise<Payments.IPayment>;
     /** Подтвердить платеж по идентификатору */
     protected capturePaymentById: (paymentId: string) => Promise<Payments.IPayment>;
     protected cancelPaymentById: (paymentId: string) => Promise<Payments.IPayment>;
     protected getRefundById: (refundId: string) => Promise<Refunds.IRefund>;
-    protected getRefundList: (filter?: Omit<GetRefundListFilter, 'cursor'>) => Promise<Refunds.IRefund[]>;
+    protected getRefundList: (filter?: Omit<GetRefundListFilter, "cursor">) => Promise<Refunds.IRefund[]>;
     protected createRefund: (newRefund: Refunds.CreateRefundRequest) => Promise<Refunds.IRefund>;
     protected getReceiptById: (receiptId: string) => Promise<Receipts.ReceiptType>;
     protected createReceipt: (newReceipt: Receipts.CreateReceiptType) => Promise<Receipts.ReceiptType>;
-    protected getReceiptList: (filter?: Omit<GetReceiptListFilter, 'cursor'>) => Promise<Receipts.ReceiptType[]>;
+    protected getReceiptList: (filter?: Omit<GetReceiptListFilter, "cursor">) => Promise<Receipts.ReceiptType[]>;
     /** Методы для работы с платежами */
     readonly payments: {
         /**
@@ -94,7 +95,7 @@ export declare class YooKassaSdk extends Connector {
          * **payments**
          * - `Payments.Payment[]` (optional): The list of payments.
          */
-        list: (filter?: Omit<GetPaymentListFilter, 'cursor'>) => Promise<Payments.IPayment[]>;
+        list: (filter?: Omit<GetPaymentListFilter, "cursor">) => Promise<Payments.IPayment[]>;
         /**
          * ****Подтверждение платежа***
          *
@@ -148,7 +149,7 @@ export declare class YooKassaSdk extends Connector {
          * [Подробнее о работе со списками](https://yookassa.ru/developers/using-api/lists)
          * @see https://yookassa.ru/developers/api#get_refunds_list
          */
-        list: (filter?: Omit<GetRefundListFilter, 'cursor'>) => Promise<Refunds.IRefund[]>;
+        list: (filter?: Omit<GetRefundListFilter, "cursor">) => Promise<Refunds.IRefund[]>;
     };
     /**
      * ****Методы для работы с чеками****
@@ -181,13 +182,36 @@ export declare class YooKassaSdk extends Connector {
          * [Подробнее о работе со списками](https://yookassa.ru/developers/using-api/lists)
          * @see https://yookassa.ru/developers/api#get_receipts_list
          */
-        list: (filter?: Omit<GetReceiptListFilter, 'cursor'>) => Promise<Receipts.ReceiptType[]>;
+        list: (filter?: Omit<GetReceiptListFilter, "cursor">) => Promise<Receipts.ReceiptType[]>;
     };
 }
 /**
- * Creates a singleton instance of YooKassaSdk with the given initialization options.
+ * Создаёт или возвращает кэшированный экземпляр YooKassaSdk.
+ * Инстансы кэшируются по `shop_id` — это позволяет переиспользовать соединения
+ * и работать с несколькими магазинами одновременно.
  *
- * @param {ConnectorOpts} init - Initialization options for the YooKassaSdk instance.
- * @return {YooKassaSdk} The singleton instance of YooKassaSdk.
+ * @param init - Параметры инициализации SDK
+ * @param forceNew - Принудительно создать новый инстанс (игнорировать кэш)
+ * @returns Экземпляр YooKassaSdk
+ *
+ * @example
+ * ```ts
+ * // Создаёт новый или возвращает кэшированный инстанс
+ * const sdk = YooKassa({
+ *   shop_id: 'your_shop_id',
+ *   secret_key: 'your_secret_key',
+ *   debug: true,
+ * })
+ *
+ * // Принудительно создать новый инстанс
+ * const newSdk = YooKassa({ ... }, true)
+ * ```
  */
-export declare function YooKassa(init: ConnectorOpts): YooKassaSdk;
+export declare function YooKassa(init: ConnectorOpts, forceNew?: boolean): YooKassaSdk;
+/**
+ * Очищает кэш инстансов SDK.
+ * Полезно при смене credentials или для освобождения памяти.
+ *
+ * @param shopId - ID магазина для удаления из кэша. Если не указан, очищается весь кэш.
+ */
+export declare function clearYooKassaCache(shopId?: string): void;

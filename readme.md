@@ -1,330 +1,368 @@
 # YooKassa SDK
 
-Этот модуль предоставляет интерфейс для интеграции с YooKassa, позволяя выполнять различные операции, такие как создание платежей, возвратов и управление ими. Написан на TypeScript.
+[![npm version](https://img.shields.io/npm/v/yookassa-api-sdk.svg)](https://www.npmjs.com/package/yookassa-api-sdk)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
+[![Bun](https://img.shields.io/badge/Bun-compatible-f9f1e1.svg)](https://bun.sh/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+Современный TypeScript SDK для интеграции с [YooKassa API](https://yookassa.ru/developers/api). Поддерживает платежи, возвраты, чеки и многое другое.
+
+## Особенности
+
+- 🚀 **Полная типизация** — написан на TypeScript с полной поддержкой типов
+- 🔄 **Автоматические повторы** — retry с exponential backoff при сетевых ошибках
+- 🔑 **Идемпотентность** — автоматическая генерация `Idempotence-Key` для безопасных повторов
+- 🌐 **Поддержка прокси** — работа через HTTP/HTTPS прокси
+- ⚡ **Rate limiting** — встроенное ограничение частоты запросов
+- 🕐 **Таймауты** — настраиваемые таймауты запросов
+- 📦 **Кэширование инстансов** — эффективное переиспользование соединений
+- 🔧 **Совместимость** — работает с Node.js, Bun и другими рантаймами
 
 ## Установка
 
-Для установки используйте npm или yarn:
-
 ```sh
-npm install yookassa-sdk
-# или
-yarn add yookassa-sdk
+# npm
+npm install yookassa-api-sdk
+
+# yarn
+yarn add yookassa-api-sdk
+
+# bun
+bun add yookassa-api-sdk
 ```
 
-## Использование
+## Быстрый старт
 
-### Параметры подключения
+```ts
+import { YooKassa } from 'yookassa-api-sdk';
+
+const sdk = YooKassa({
+    shop_id: 'ваш_идентификатор_магазина',
+    secret_key: 'ваш_секретный_ключ',
+});
+
+// Создание платежа
+const payment = await sdk.payments.create({
+    amount: { value: '100.00', currency: 'RUB' },
+    confirmation: { type: 'redirect', return_url: 'https://example.com' },
+    description: 'Заказ №1',
+});
+
+console.log(payment.confirmation.confirmation_url);
+```
+
+## Параметры подключения
 
 ```ts
 interface ConnectorOpts {
-    debug?: boolean;
-    secret_key: string;
+    /** Идентификатор магазина (обязательный) */
     shop_id: string;
+
+    /** Секретный ключ магазина (обязательный) */
+    secret_key: string;
+
+    /** Режим отладки — логирует запросы и ответы */
+    debug?: boolean;
+
+    /** Таймаут запроса в миллисекундах (по умолчанию: 5000) */
+    timeout?: number;
+
+    /** Количество повторных попыток при ошибках (по умолчанию: 5) */
+    retries?: number;
+
+    /** Максимальное количество запросов в секунду (по умолчанию: 5) */
+    maxRPS?: number;
+
+    /** Прокси-сервер (строка URL или объект конфигурации) */
+    proxy?: string | AxiosProxyConfig;
+
+    /** Кастомный эндпоинт API */
+    endpoint?: string;
 }
 ```
 
-- `debug`: Опциональный параметр для включения режима отладки.
-- `secret_key`: Секретный ключ вашего магазина.
-- `shop_id`: Идентификатор вашего магазина.
-
-### Инициализация SDK
-
-Для начала работы необходимо инициализировать SDK с использованием параметров подключения.
+### Примеры инициализации
 
 ```ts
-import { YooKassa, ConnectorOpts } from 'yookassa-sdk';
+// Базовая инициализация
+const sdk = YooKassa({
+    shop_id: '123456',
+    secret_key: 'test_secret_key',
+});
 
-const initOpts: ConnectorOpts = {
+// С отладкой и кастомными настройками
+const sdk = YooKassa({
+    shop_id: '123456',
+    secret_key: 'live_secret_key',
     debug: true,
-    secret_key: 'ваш_секретный_ключ',
-    shop_id: 'ваш_идентификатор_магазина',
-};
+    timeout: 10000, // 10 секунд
+    retries: 3, // 3 повтора
+    maxRPS: 10, // 10 запросов в секунду
+});
 
-const sdk = YooKassa(initOpts);
+// С прокси (строка)
+const sdk = YooKassa({
+    shop_id: '123456',
+    secret_key: 'live_secret_key',
+    proxy: 'http://user:password@proxy.example.com:8080',
+});
+
+// С прокси (объект)
+const sdk = YooKassa({
+    shop_id: '123456',
+    secret_key: 'live_secret_key',
+    proxy: {
+        host: 'proxy.example.com',
+        port: 8080,
+        auth: { username: 'user', password: 'password' },
+    },
+});
 ```
 
-### Платежи
+## Кэширование инстансов
 
-#### Создание платежа
+SDK автоматически кэширует инстансы по `shop_id`. Это позволяет:
 
-Для создания платежа необходимо вызвать метод `create` с необходимыми параметрами.
+- Переиспользовать соединения
+- Работать с несколькими магазинами одновременно
 
 ```ts
-import { CurrencyEnum } from 'yookassa-sdk';
+// Оба вызова вернут один и тот же инстанс
+const sdk1 = YooKassa({ shop_id: '123', secret_key: 'key1' });
+const sdk2 = YooKassa({ shop_id: '123', secret_key: 'key1' });
+console.log(sdk1 === sdk2); // true
 
-async function createPayment() {
-    const response = await sdk.payments.create({
-        receipt: {
-            items: [
-                {
-                    amount: {
-                        currency: CurrencyEnum.RUB,
-                        value: '10.00',
-                    },
-                    description: 'Услуга 1',
-                    quantity: 1,
-                    vat_code: 1,
-                },
-            ],
-        },
-        amount: {
-            currency: CurrencyEnum.RUB,
-            value: '10.00',
-        },
-        confirmation: {
-            type: 'redirect',
-            return_url: 'https://example.com',
-        },
-        description: 'Описание заказа',
-    });
+// Разные магазины — разные инстансы
+const shop1 = YooKassa({ shop_id: '111', secret_key: 'key1' });
+const shop2 = YooKassa({ shop_id: '222', secret_key: 'key2' });
 
-    console.log('Payment created:', response);
-}
+// Принудительное создание нового инстанса
+const newSdk = YooKassa({ shop_id: '123', secret_key: 'new_key' }, true);
 
-createPayment();
+// Очистка кэша
+import { clearYooKassaCache } from 'yookassa-api-sdk';
+clearYooKassaCache('123'); // Удалить конкретный магазин
+clearYooKassaCache(); // Очистить весь кэш
+```
+
+## Платежи
+
+### Создание платежа
+
+```ts
+import { CurrencyEnum } from 'yookassa-api-sdk';
+
+const payment = await sdk.payments.create({
+    amount: {
+        value: '100.00',
+        currency: CurrencyEnum.RUB,
+    },
+    confirmation: {
+        type: 'redirect',
+        return_url: 'https://example.com/return',
+    },
+    capture: true,
+    description: 'Заказ №123',
+    receipt: {
+        customer: { email: 'customer@example.com' },
+        items: [
+            {
+                description: 'Товар',
+                quantity: 1,
+                amount: { value: '100.00', currency: CurrencyEnum.RUB },
+                vat_code: 1,
+            },
+        ],
+    },
+    metadata: {
+        order_id: '123',
+    },
+});
 ```
 
 [Документация по созданию платежа](https://yookassa.ru/developers/api#create_payment)
 
-#### Получение информации о платеже
-
-Для получения информации о конкретном платеже используйте метод `load`.
+### Получение информации о платеже
 
 ```ts
-async function getPayment(paymentId: string) {
-    const response = await sdk.payments.load(paymentId);
-    console.log('Payment details:', response);
-}
-
-getPayment('paymentId');
+const payment = await sdk.payments.load('payment_id');
+console.log(payment.status); // pending, waiting_for_capture, succeeded, canceled
 ```
 
-[Документация по получению информации о платеже](https://yookassa.ru/developers/api#get_payment)
+[Документация](https://yookassa.ru/developers/api#get_payment)
 
-#### Список платежей
-
-Для получения списка платежей используйте метод `list`.
+### Список платежей
 
 ```ts
-async function listPayments() {
-    const response = await sdk.payments.list({
-        created_at: { gte: '2022-01-01T00:00:00.000Z' },
-        limit: 10,
-    });
-    console.log('Payments list:', response);
-}
-
-listPayments();
+const payments = await sdk.payments.list({
+    created_at: { gte: '2024-01-01T00:00:00.000Z' },
+    status: 'succeeded',
+    limit: 50,
+});
 ```
 
-[Документация по получению списка платежей](https://yookassa.ru/developers/api#get_payments_list)
+[Документация](https://yookassa.ru/developers/api#get_payments_list)
 
-#### Подтверждение платежа
-
-Для подтверждения платежа используйте метод `capture`.
+### Подтверждение платежа
 
 ```ts
-async function capturePayment(paymentId: string) {
-    const response = await sdk.payments.capture(paymentId);
-    console.log('Payment captured:', response);
-}
-
-capturePayment('paymentId');
+const payment = await sdk.payments.capture('payment_id');
 ```
 
-[Документация по подтверждению платежа](https://yookassa.ru/developers/payment-acceptance/getting-started/payment-process#capture-and-cancel)
+[Документация](https://yookassa.ru/developers/payment-acceptance/getting-started/payment-process#capture-and-cancel)
 
-#### Отмена платежа
-
-Для отмены платежа используйте метод `cancel`.
+### Отмена платежа
 
 ```ts
-async function cancelPayment(paymentId: string) {
-    const response = await sdk.payments.cancel(paymentId);
-    console.log('Payment canceled:', response);
-}
-
-cancelPayment('paymentId');
+const payment = await sdk.payments.cancel('payment_id');
 ```
 
-[Документация по отмене платежа](https://yookassa.ru/developers/payment-acceptance/getting-started/payment-process#capture-and-cancel)
+[Документация](https://yookassa.ru/developers/payment-acceptance/getting-started/payment-process#capture-and-cancel)
 
-### Возвраты
+## Возвраты
 
-#### Создание возврата
-
-Для создания возврата используйте метод `create`.
+### Создание возврата
 
 ```ts
-import { CurrencyEnum } from 'yookassa-sdk';
+const refund = await sdk.refunds.create({
+    payment_id: 'payment_id',
+    amount: {
+        value: '50.00',
+        currency: CurrencyEnum.RUB,
+    },
+});
+```
 
-async function createRefund(paymentId: string) {
-    const response = await sdk.refunds.create({
-        payment_id: paymentId,
-        amount: {
-            value: '10.00',
-            currency: CurrencyEnum.RUB,
+[Документация](https://yookassa.ru/developers/api#create_refund)
+
+### Получение информации о возврате
+
+```ts
+const refund = await sdk.refunds.load('refund_id');
+```
+
+[Документация](https://yookassa.ru/developers/api#get_refund)
+
+### Список возвратов
+
+```ts
+const refunds = await sdk.refunds.list({
+    payment_id: 'payment_id',
+    limit: 10,
+});
+```
+
+[Документация](https://yookassa.ru/developers/api#get_refunds_list)
+
+## Чеки
+
+### Создание чека
+
+```ts
+const receipt = await sdk.receipts.create({
+    type: 'payment',
+    payment_id: 'payment_id',
+    customer: {
+        email: 'customer@example.com',
+    },
+    items: [
+        {
+            description: 'Товар',
+            quantity: 1,
+            amount: { value: '100.00', currency: CurrencyEnum.RUB },
+            vat_code: 1,
         },
-    });
-
-    console.log('Refund created:', response);
-}
-
-createRefund('paymentId');
+    ],
+    send: true,
+});
 ```
 
-[Документация по созданию возврата](https://yookassa.ru/developers/api#create_refund)
+[Документация](https://yookassa.ru/developers/api#create_receipt)
 
-#### Получение информации о возврате
-
-Для получения информации о конкретном возврате используйте метод `load`.
+### Получение информации о чеке
 
 ```ts
-async function getRefund(refundId: string) {
-    const response = await sdk.refunds.load(refundId);
-    console.log('Refund details:', response);
-}
-
-getRefund('refundId');
+const receipt = await sdk.receipts.load('receipt_id');
 ```
 
-[Документация по получению информации о возврате](https://yookassa.ru/developers/api#get_refund)
+[Документация](https://yookassa.ru/developers/api#get_receipt)
 
-#### Список возвратов
-
-Для получения списка возвратов используйте метод `list`.
+### Список чеков
 
 ```ts
-async function listRefunds() {
-    const response = await sdk.refunds.list({
-        created_at: { gte: '2022-01-01T00:00:00.000Z' },
-        limit: 10,
-    });
-    console.log('Refunds list:', response);
-}
-
-listRefunds();
+const receipts = await sdk.receipts.list({
+    payment_id: 'payment_id',
+});
 ```
 
-[Документация по получению списка возвратов](https://yookassa.ru/developers/api#get_refunds_list)
+[Документация](https://yookassa.ru/developers/api#get_receipts_list)
 
-### Чеки
+## Обработка ошибок
 
-#### Создание чека
-
-Для создания чека используйте метод `create`.
+SDK возвращает унифицированный формат ответа:
 
 ```ts
-async function createReceipt() {
-    const response = await sdk.receipts.create({
-        customer: {
-            full_name: 'Иван Иванов',
-            inn: '1234567890',
-            email: 'ivanov@example.com',
-            phone: '79000000000',
-        },
-        items: [
-            {
-                description: 'Товар 1',
-                quantity: 1.0,
-                amount: {
-                    value: '100.00',
-                    currency: CurrencyEnum.RUB,
-                },
-                vat_code: 1,
-                payment_mode: 'full_prepayment',
-                payment_subject: 'commodity',
-            },
-        ],
-        payments: [
-            {
-                type: 'cashless',
-                amount: {
-                    value: '100.00',
-                    currency: CurrencyEnum.RUB,
-                },
-            },
-        ],
-        type: 'payment',
-        send: true,
-    });
-
-    console.log('Receipt created:', response);
+try {
+    const payment = await sdk.payments.create({ ... })
+    // Успех
+} catch (error) {
+    // YooKassaErr содержит:
+    // - error.name — код ошибки (например, 'invalid_request')
+    // - error.message — описание ошибки
+    // - error.id — идентификатор запроса
+    console.error(error.name, error.message)
 }
-
-createReceipt();
 ```
 
-[Документация по созданию чека](https://yookassa.ru/developers/api#create_receipt)
+### Типы ошибок
 
-#### Получение информации о чеке
+| Код                     | Описание                |
+| ----------------------- | ----------------------- |
+| `invalid_request`       | Неверный запрос         |
+| `invalid_credentials`   | Неверные учётные данные |
+| `forbidden`             | Доступ запрещён         |
+| `not_found`             | Объект не найден        |
+| `too_many_requests`     | Превышен лимит запросов |
+| `internal_server_error` | Ошибка сервера          |
+| `NETWORK_ERROR`         | Сетевая ошибка          |
+| `ECONNABORTED`          | Таймаут запроса         |
 
-Для получения информации о конкретном чеке используйте метод `load`.
-
-```ts
-async function getReceipt(receiptId: string) {
-    const response = await sdk.receipts.load(receiptId);
-    console.log('Receipt details:', response);
-}
-
-getReceipt('receiptId');
-```
-
-[Документация по получению информации о чеке](https://yookassa.ru/developers/api#get_receipt)
-
-#### Список чеков
-
-Для получения списка чеков используйте метод `list`.
-
-```ts
-async function listReceipts() {
-    const response = await sdk.receipts.list({
-        created_at: { gte: '2022-01-01T00:00:00.000Z' },
-        limit: 10,
-    });
-    console.log('Receipts list:', response);
-}
-
-listReceipts();
-```
-
-[Документация по получению списка чеков](https://yookassa.ru/developers/api#get_receipts_list)
-
-
-## Методы SDK
+## Справочник методов
 
 ### Payments
 
-- `create(data: CreatePaymentPayload): Promise<Payment>`
-  - Создание нового платежа. [Документация](https://yookassa.ru/developers/api#create_payment)
-- `load(paymentId: string): Promise<Payment>`
-  - Получение информации о платеже по его идентификатору. [Документация](https://yookassa.ru/developers/api#get_payment)
-- `list(params: GetPaymentListFilter): Promise<Payments.IPayment[]>`
-  - Получение списка платежей с возможностью фильтрации по различным параметрам. [Документация](https://yookassa.ru/developers/api#get_payments_list)
-- `capture(paymentId: string): Promise<Payment>`
-  - Подтверждение платежа, переводящего его в статус `succeeded`. [Документация](https://yookassa.ru/developers/payment-acceptance/getting-started/payment-process#capture-and-cancel)
-- `cancel(paymentId: string): Promise<Payment>`
-  - Отмена платежа, переводящего его в статус `canceled`. [Документация](https://yookassa.ru/developers/payment-acceptance/getting-started/payment-process#capture-and-cancel)
+| Метод          | Описание                |
+| -------------- | ----------------------- |
+| `create(data)` | Создание платежа        |
+| `load(id)`     | Получение платежа по ID |
+| `list(filter)` | Список платежей         |
+| `capture(id)`  | Подтверждение платежа   |
+| `cancel(id)`   | Отмена платежа          |
 
 ### Refunds
 
-- `create(data: CreateRefundPayload): Promise<Refund>`
-  - Создание нового возврата для указанного платежа. [Документация](https://yookassa.ru/developers/api#create_refund)
-- `load(refundId: string): Promise<Refund>`
-  - Получение информации о возврате по его идентификатору. [Документация](https://yookassa.ru/developers/api#get_refund)
-- `list(params: GetRefundListFilter): Promise<Refunds.IRefund[]>`
-  - Получение списка возвратов с возможностью фильтрации по различным параметрам. [Документация](https://yookassa.ru/developers/api#get_refunds_list)
+| Метод          | Описание                 |
+| -------------- | ------------------------ |
+| `create(data)` | Создание возврата        |
+| `load(id)`     | Получение возврата по ID |
+| `list(filter)` | Список возвратов         |
 
 ### Receipts
 
-- `create(data: CreateReceiptPayload): Promise<Receipt>`
-  - Создание нового чека. [Документация](https://yookassa.ru/developers/api#create_receipt)
-- `load(receiptId: string): Promise<Receipt>`
-  - Получение информации о чеке по его идентификатору. [Документация](https://yookassa.ru/developers/api#get_receipt)
-- `list(params: GetReceiptListFilter): Promise<Receipts.IReceipt[]>`
-  - Получение списка чеков с возможностью фильтрации по различным параметрам. [Документация](https://yookassa.ru/developers/api#get_receipts_list)
+| Метод          | Описание             |
+| -------------- | -------------------- |
+| `create(data)` | Создание чека        |
+| `load(id)`     | Получение чека по ID |
+| `list(filter)` | Список чеков         |
 
-## Заключение
+## Автор
 
-Этот SDK предоставляет удобный интерфейс для работы с YooKassa API, позволяя легко интегрировать платежные функции в ваше приложение. Для получения дополнительной информации обратитесь к официальной документации YooKassa.
+**Aleksey Aleksyuk** ([@awardix](https://github.com/awardix))
+
+## Благодарности
+
+Этот проект является форком [yookassa-sdk](https://github.com/googlesheets-ru/yookassa-sdk) от **Dmitriy** ([@Mityayka1](https://github.com/Mityayka1)). Спасибо за оригинальную реализацию!
+
+## Лицензия
+
+[MIT](LICENSE)

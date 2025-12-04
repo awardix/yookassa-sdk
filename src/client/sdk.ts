@@ -1,15 +1,16 @@
 import {
-    CreatePaymentResponse,
-    GetListResponse,
-    GetPaymentListFilter,
-    GetReceiptListFilter,
-    GetRefundListFilter,
     YooKassaErr,
-} from '../types/api.types';
-import { Payments } from '../types/payments';
-import { Connector, ConnectorOpts, RequestOpts } from './connector';
-import { Refunds } from '../types/refunds';
-import { Receipts } from '../types/receipt';
+    type CreatePaymentResponse,
+    type GetListResponse,
+    type GetPaymentListFilter,
+    type GetReceiptListFilter,
+    type GetRefundListFilter,
+} from '../types/api.types'
+import type { Payments } from '../types/payments'
+import { Connector } from './connector'
+import type { ConnectorOpts, RequestOpts } from './connector'
+import type { Refunds } from '../types/refunds'
+import type { Receipts } from '../types/receipt'
 
 export class YooKassaSdk extends Connector {
     constructor(opts: ConnectorOpts) {
@@ -377,16 +378,53 @@ export class YooKassaSdk extends Connector {
     };
 }
 
-let client: YooKassaSdk;
+/** Кэш инстансов SDK по shop_id */
+const clientCache = new Map<string, YooKassaSdk>()
+
 /**
- * Creates a singleton instance of YooKassaSdk with the given initialization options.
+ * Создаёт или возвращает кэшированный экземпляр YooKassaSdk.
+ * Инстансы кэшируются по `shop_id` — это позволяет переиспользовать соединения
+ * и работать с несколькими магазинами одновременно.
  *
- * @param {ConnectorOpts} init - Initialization options for the YooKassaSdk instance.
- * @return {YooKassaSdk} The singleton instance of YooKassaSdk.
+ * @param init - Параметры инициализации SDK
+ * @param forceNew - Принудительно создать новый инстанс (игнорировать кэш)
+ * @returns Экземпляр YooKassaSdk
+ *
+ * @example
+ * ```ts
+ * // Создаёт новый или возвращает кэшированный инстанс
+ * const sdk = YooKassa({
+ *   shop_id: 'your_shop_id',
+ *   secret_key: 'your_secret_key',
+ *   debug: true,
+ * })
+ *
+ * // Принудительно создать новый инстанс
+ * const newSdk = YooKassa({ ... }, true)
+ * ```
  */
-export function YooKassa(init: ConnectorOpts) {
-    if (!client) {
-        client = new YooKassaSdk(init);
+export function YooKassa(init: ConnectorOpts, forceNew = false): YooKassaSdk {
+    const cacheKey = init.shop_id
+
+    if (!forceNew && clientCache.has(cacheKey)) {
+        return clientCache.get(cacheKey)!
     }
-    return client;
+
+    const client = new YooKassaSdk(init)
+    clientCache.set(cacheKey, client)
+    return client
+}
+
+/**
+ * Очищает кэш инстансов SDK.
+ * Полезно при смене credentials или для освобождения памяти.
+ *
+ * @param shopId - ID магазина для удаления из кэша. Если не указан, очищается весь кэш.
+ */
+export function clearYooKassaCache(shopId?: string): void {
+    if (shopId) {
+        clientCache.delete(shopId)
+    } else {
+        clientCache.clear()
+    }
 }
